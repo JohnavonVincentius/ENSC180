@@ -44,7 +44,7 @@ function unoGameUI()
     % Initialize cards and deck
     deck = {'Red 5', 'Blue Skip', 'Green 2', 'Yellow Reverse', 'Wild Wild', 'Red 3', 'Blue 6', 'Green Skip', 'Yellow 7'};
     yourCards = {'Red 5', 'Blue Skip', 'Green 2', 'Yellow Reverse'};
-    renderCards(yourCards, yourHandPanel);
+    renderCards(yourCards);
 
     % Update other player card counts
     northCardCount.Text = '4 cards';
@@ -52,12 +52,14 @@ function unoGameUI()
     westCardCount.Text = '5 cards';
 
     % Nested function to render cards
-    function renderCards(cards, panel)
-        delete(allchild(panel));  % Clear previous buttons
+    function renderCards(cards)
+        % Clear any existing UI elements before re-adding
+        delete(allchild(yourHandPanel));  % Remove all child components
 
+        % Loop through the current cards and add them as buttons
         for i = 1:numel(cards)
             [cardColor, cardText] = parseCard(cards{i});
-            uibutton(panel, ...
+            uibutton(yourHandPanel, ...
                 'Text', cardText, ...
                 'Position', [(i-1)*90+10, 30, 80, 50], ...
                 'BackgroundColor', cardColor, ...
@@ -71,18 +73,20 @@ function unoGameUI()
 
     % Nested function to play a card
     function playCardCallback(cardButton, cards, cardIndex)
+        % Log the card being played
         disp(['You played card: ', cards{cardIndex}]);
 
+        % Update the discard pile with only the type of the card (e.g., '5')
         [cardColor, cardText] = parseCard(cards{cardIndex});
         discardPile.Text = cardText;
         discardPile.BackgroundColor = cardColor;
 
-        % Remove card from your hand
-        cards = cards([1:cardIndex-1, cardIndex+1:end]);
+        % Remove the played card from the hand
+        cards = [cards(1:cardIndex-1), cards(cardIndex+1:end)];  % Ensure only the played card is removed
 
-        % Refresh the hand
-        renderCards(cards, yourHandPanel);
-        delete(cardButton);
+        % Refresh the hand without resetting the entire panel
+        renderCards(cards);
+        delete(cardButton);  % Remove the button corresponding to the played card
     end
 
     % Nested function to draw a card
@@ -91,8 +95,19 @@ function unoGameUI()
         newCard = deck{randi(numel(deck))};
         yourCards{end+1} = newCard;
 
-        % Refresh your hand with the new card
-        renderCards(yourCards, yourHandPanel);
+        % Add a new button for the drawn card at the correct position
+        [cardColor, cardText] = parseCard(newCard);
+        uibutton(yourHandPanel, ...
+            'Text', cardText, ...
+            'Position', [(numel(yourCards)-1)*90+10, 30, 80, 50], ...  % Position new card at the end
+            'BackgroundColor', cardColor, ...
+            'HorizontalAlignment', 'center', ...
+            'FontWeight', 'bold', ...
+            'FontSize', 14, ...
+            'UserData', numel(yourCards), ...
+            'ButtonPushedFcn', @(src, event) playCardCallback(src, yourCards, numel(yourCards)));
+
+        % Display message for the drawn card
         disp(['You drew a card: ', newCard]);
     end
 
