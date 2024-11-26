@@ -1,9 +1,10 @@
 % UNO Game Client with JSON Transport
 serverIP = '127.0.0.1';
-port = 55000;
+port = 5052;
 
 disp('Connecting to UNO server...');
 client = tcpclient(serverIP, port);
+write(client, jsonencode(struct('type', 'connect')), "string");
 disp('Connected to UNO server.');
 
 % Listen for messages from the server

@@ -1,176 +1,229 @@
+% ================== INITIAL CONFIGURATION ================== %
+SERVER_ADDR = "0.0.0.0";
+SERVER_PORT = 5052;
+PLAYER_START = 4;
+
+% ================== SERVER INITIALIZATION ================== %
 disp('Initializing Game States...');
-initGameState('0.0.0.0' , 55500)        %Init Server and GameStates (BIND,PORT)
+initGameState(SERVER_ADDR, SERVER_PORT, PLAYER_START); % Init Server and Game States
 disp('UNO Server started. Waiting for players to connect...');
+
 % ================== PRIMARY MAIN FUNCTION ================== %
 while true
-    main()
+    try 
+        main();
+    catch exception 
+        disp("Error: " + exception.message);
+    end 
     pause(0.1); % Prevent busy waiting
 end
-% ================== ===================== ================== %
+
+% ================== FUNCTION DEFINITIONS ================== %
 
 function main()
-    if server.Connected
+    global client;
+    if client.Connected
         % Read incoming data
-        if server.NumBytesAvailable > 0
-            onSRVReceive(server)
+        if client.NumBytesAvailable > 0
+            onSRVReceive(client);
         end
     end
 end
 
-function initGameState(bind, port)
-    global players
-    global mainDeck
-    global discardPile
-    global currentTurn
-    global server
+function initGameState(bind, port, PLAYER_START)
+    global players;
+    global playerHands;
+    global mainDeck;
+    global discardPile;
+    global currentTurn;
+    global playerGameStart;
+    global client;
 
-    server = tcpserver(bind, port); % Create the TCP server
+    playerGameStart = PLAYER_START;
+
+    client = tcpserver(bind, port); % Create the TCP server
 
     players = {};
+    playerHands = {};
     mainDeck = createUnoDeck();
-    discardPile = [];
+    discardPile = {};
     currentTurn = 1;
 end
 
-function deck = createUnoDeck()
-    colors = {'Red', 'Green', 'Blue', 'Yellow'};
-    cardIDs = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Skip', 'Reverse', 'Draw Two'};
-    deck = [];
-    for c = 1:numel(colors)
-        for id = 1:numel(cardIDs)
-            deck = [deck; {cardIDs{id}, colors{c}}];
-            if ~strcmp(cardIDs{id}, '0')
-                deck = [deck; {cardIDs{id}, colors{c}}];
-            end
-        end
-    end
-    for i = 1:4
-        deck = [deck; {'Wild', 'None'}; {'Wild Draw Four', 'None'}];
-    end
-    deck = deck(randperm(size(deck, 1)), :); % Shuffle the deck
-end
+function onSRVReceive(client)
+    global players;
 
-function [cards] = drawCards (numCards)
-    % Function to draw cards from the deck with unlimited capacity
-    cards = {}; % Initialize the drawn cards
-
-    for i = 1:numCards
-        % If the deck is empty, reshuffle the discard pile back into the deck
-        if isempty(mainDeck)
-            if isempty(discardPile)
-                error('Deck and discard pile are empty! Cannot draw more cards.');
-            end
-            % Reshuffle the discard pile into the deck (leave the top card)
-            topCard = discardPile(end, :);
-            mainDeck = discardPile(1:end-1, :); % Take all but the top card
-            discardPile = topCard; % Keep the top card as the discard pile
-            mainDeck = mainDeck(randperm(size(mainDeck, 1)), :); % Shuffle the deck
-            disp('Reshuffling discard pile into deck...');
-        end
-
-        % Draw the top card from the deck
-        cards = [cards; mainDeck(1, :)]; % Add the top card to the drawn cards
-        mainDeck(1, :) = []; % Remove the drawn card from the deck
-    end
-end
-
-function onSRVReceive(server)
-    jsonData = read(server, server.NumBytesAvailable, "string");
+    jsonData = read(client, client.NumBytesAvailable, "string");
     data = jsondecode(jsonData);
+
     % Handle different types of messages
     if isfield(data, 'type')
         switch data.type
             case 'connect'
-                % Player connection
-                players{end+1} = server; % Add player to the list
-                playerData{end+1} = struct('id', numel(players), 'hand', []);
-                disp(['Player ', num2str(numel(players)), ' connected.']);
-                write(server, jsonencode(struct('type', 'welcome', 'message', 'Welcome to UNO!')), "string");
-
-                if numel(players) > 1
-                    broadcastToAll(struct('type', 'start', 'message', 'Game is starting!'));
-                    startGame();
-                end
-
-
+                onPlayerConnect(client);
             case 'move'
-                % Process player move
-                disp(['Player move: ', data.move]);
-                write(server, jsonencode(struct('type', 'response', 'message', 'Move received!')), "string");
-
+                onPlayerMove(data);
             otherwise
-                % Unknown message type
                 disp('Unknown message type received.');
-                write(server, jsonencode(struct('type', 'error', 'message', 'Unknown message type!')), "string");
+                write(client, jsonencode(struct('type', 'error', 'message', 'Unknown message type!')), "string");
         end
     end
 end
 
-function onPlayerConnected(src, ~)
-    disp('A new player has connected.');
-    players{end+1} = src;
-    playerHands{end+1} = drawCards(deck, 7);
-    if numel(players) > 1
+function onPlayerConnect(client)
+    global players;
+    global playerHands;
+    global playerGameStart;
+
+    players{end+1} = client;
+    playerHands{end+1} = drawCards(7); % Draw 7 cards
+    disp(['Player ', num2str(numel(players)), ' connected.']);
+    write(client, jsonencode(struct('type', 'welcome', 'message', 'Welcome to UNO!')), "string");
+
+    if numel(players) >= playerGameStart
         broadcastToAll(struct('type', 'start', 'message', 'Game is starting!'));
         startGame();
     end
 end
 
-% Function to start the game
 function startGame()
-    discardPile = [discardPile; drawCards(deck, 1)];
+    global discardPile;
+    global currentTurn;
+    global players;
+
+    discardPile = drawCards(1); % Draw the first card
     broadcastToAll(struct('type', 'game_update', 'message', ...
-        ['Starting card is: ', discardPile{end}], 'discard_pile', discardPile));
+        ['Starting card is: ', discardPile{1}], 'discard_pile', discardPile));
     sendToPlayer(currentTurn, struct('type', 'turn', 'message', 'Your turn!'));
 end
 
-% Function to process a player's move
-function processMove(playerID, jsonData)
-    move = jsonData.move; % Read the move from JSON
-    disp(['Player ', num2str(playerID), ' played: ', move]);
+function onPlayerMove(data)
+    global currentTurn;
+    global discardPile;
 
-    % Validate move
+    move = data.move;
+    disp(['Player ', num2str(currentTurn), ' played: ', move]);
+
+    % Validate the move
     if ~isValidMove(move, discardPile)
-        sendToPlayer(playerID, struct('type', 'error', 'message', 'Invalid move! Try again.'));
+        sendToPlayer(currentTurn, struct('type', 'error', 'message', 'Invalid move! Try again.'));
         return;
     end
 
     % Apply the move
     discardPile{end+1} = move;
-    playerHands{playerID}(strcmp(playerHands{playerID}, move)) = [];
-    broadcastToAll(struct('type', 'game_update', 'message', ...
-        ['Player ', num2str(playerID), ' played: ', move], 'discard_pile', discardPile));
 
-    % Handle special cards and update turn
-    handleSpecialCard(playerID, move);
+    % Handle special cards and advance turn
+    handleSpecialCard(move);
 
     % Check for winner
-    if isempty(playerHands{playerID})
+    if isempty(playerHands{currentTurn})
         broadcastToAll(struct('type', 'game_end', 'message', ...
-            ['Player ', num2str(playerID), ' wins!']));
+            ['Player ', num2str(currentTurn), ' wins!']));
         return;
     end
 
     % Notify the next player
+    currentTurn = advanceTurn(currentTurn, numel(players));
     sendToPlayer(currentTurn, struct('type', 'turn', 'message', 'Your turn!'));
 end
 
-% Function to handle special cards
-function handleSpecialCard(playerID, move)
-    % Process special cards as described earlier
-    % (e.g., Skip, Reverse, Draw Two, Wild, Wild Draw Four)
+function handleSpecialCard(move)
+    global currentTurn;
+    global players;
+    global playerHands;
+    global mainDeck;
+    global discardPile;
+
+    cardType = move{1}; % Get the card type (e.g., Skip, Reverse, etc.)
+    switch cardType
+        case 'Skip'
+            % Skip the next player's turn
+            disp('Skip card played!');
+            currentTurn = advanceTurn(currentTurn, numel(players)); % Skip the next player
+
+        case 'Reverse'
+            % Reverse the turn order
+            disp('Reverse card played!');
+            players = flip(players); % Flip the players' order
+            playerHands = flip(playerHands); % Flip the player hands
+            currentTurn = numel(players) - currentTurn + 1; % Adjust the current turn
+
+        case 'Draw Two'
+            % Draw two cards for the next player
+            nextPlayer = advanceTurn(currentTurn, numel(players));
+            playerHands{nextPlayer} = [playerHands{nextPlayer}; drawCards(2)];
+            disp(['Player ', num2str(nextPlayer), ' draws two cards!']);
+            currentTurn = advanceTurn(nextPlayer, numel(players)); % Skip the next player's turn
+
+        case 'Wild'
+            % Let the player choose a new color
+            disp('Wild card played! Waiting for color choice...');
+            newColor = promptColor(currentTurn); % Prompt for color selection
+            discardPile{end, 2} = newColor; % Update the discard pile with the chosen color
+            disp(['Player ', num2str(currentTurn), ' chose ', newColor, ' as the new color!']);
+
+        case 'Wild Draw Four'
+            % Force the next player to draw four cards and let the player choose a color
+            disp('Wild Draw Four card played!');
+            nextPlayer = advanceTurn(currentTurn, numel(players));
+            playerHands{nextPlayer} = [playerHands{nextPlayer}; drawCards(4)];
+            newColor = promptColor(currentTurn); % Prompt for color selection
+            discardPile{end, 2} = newColor; % Update the discard pile with the chosen color
+            disp(['Player ', num2str(currentTurn), ' chose ', newColor, ' as the new color!']);
+            disp(['Player ', num2str(nextPlayer), ' draws four cards!']);
+            currentTurn = advanceTurn(nextPlayer, numel(players)); % Skip the next player's turn
+
+        otherwise
+            % No special effect for normal cards
+            disp('Normal card played.');
+            currentTurn = advanceTurn(currentTurn, numel(players)); % Advance to the next player
+    end
 end
 
-% JSON message broadcasting
+
+function isValid = isValidMove(move, discardPile)
+    % Check if the move is valid
+    lastCard = discardPile{end};
+    isValid = strcmp(move.color, lastCard.color) || strcmp(move.type, lastCard.type);
+end
+
+function [cards] = drawCards(numCards)
+    global mainDeck;
+    global discardPile;
+
+    cards = {}; % Initialize drawn cards
+    for i = 1:numCards
+        if isempty(mainDeck)
+            if isempty(discardPile)
+                error('Deck and discard pile are empty!');
+            end
+            % Reshuffle discard pile into deck
+            topCard = discardPile(end, :);
+            mainDeck = discardPile(1:end-1, :); % Exclude top card
+            discardPile = topCard;
+            mainDeck = mainDeck(randperm(size(mainDeck, 1)), :); % Shuffle
+            disp('Reshuffling discard pile into deck...');
+        end
+        cards{end+1} = mainDeck(1, :);
+        mainDeck(1, :) = []; % Remove the card
+    end
+end
+
+function nextTurn = advanceTurn(currentTurn, totalPlayers)
+    nextTurn = mod(currentTurn, totalPlayers) + 1;
+end
+
 function broadcastToAll(data)
+    global players;
     jsonMessage = jsonencode(data);
     for i = 1:numel(players)
         write(players{i}, jsonMessage, "string");
     end
 end
 
-% JSON message sending to a specific player
 function sendToPlayer(playerID, data)
+    global players;
     jsonMessage = jsonencode(data);
     write(players{playerID}, jsonMessage, "string");
 end
