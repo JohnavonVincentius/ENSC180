@@ -4,7 +4,7 @@ clear all;
 global playerGameStart;
 SERVER_ADDR = "0.0.0.0";
 SERVER_PORT = 5050;
-playerGameStart = 1;
+playerGameStart = 2;
 
 % ================== SERVER INITIALIZATION ================== %
 disp('Initializing Game States...');
@@ -16,7 +16,23 @@ global currentTurn;
 global client;
 global app;
 
-client = tcpserver(SERVER_ADDR, SERVER_PORT);
+function connectionHandler(server, ~)
+    % Check for new connections
+    if server.Connected
+        % Display client information
+        disp('New client connected.');
+
+        % Handle the client in a separate task
+        clientTask = parfeval(@handleClient, 0, server);
+        
+        % Note: You can keep track of `clientTask` if needed for later management.
+    else
+        disp('A client disconnected.');
+    end
+end
+
+
+client = tcpserver('127.0.0.1', 55000, 'ConnectionChangedFcn', @connectionHandler);
 app = uifigure('Name', 'Uno Game Server Console', 'Position', [100, 100, 600, 400]);
 uibutton(app, 'Text', 'Terminate Server', ...
     'Position', [450, 20, 120, 40], ...
@@ -34,6 +50,22 @@ discardPile = [];
 currentTurn = 1;
 
 disp('UNO Server started. Waiting for players to connect...');
+
+function handleClient(server)
+    % Read and respond to the client
+    while server.Connected
+        if server.Connected
+            % Read incoming data
+            if client.NumBytesAvailable > 0
+                onSRVReceive(server);
+            end
+        end
+        pause(0.1);
+    end
+
+    disp('Client handling completed.');
+end
+
 
 % ================== PRIMARY MAIN FUNCTION ================== %
 global stop;
@@ -74,6 +106,8 @@ function onSRVReceive(client)
                 onPlayerConnect(client);
             case 'move'
                 onPlayerMove(data);
+            case 'draw_card'
+                playerDrawCard(client);
             otherwise
                 disp('Unknown message type received.');
                 write(client, jsonencode(struct('type', 'error', 'message', 'Unknown message type!')), "string");
@@ -97,6 +131,7 @@ function onPlayerConnect(client)
     );
 
     if numel(players) >= playerGameStart
+        pause(1);
         broadcastToAll(struct('type', 'start'));
         startGame();
     end
@@ -119,6 +154,15 @@ end
 
 % ========== GAME START ========== %
 
+function playerDrawCard(client)
+    global players;
+    global playerHands;
+    senderIndex = cellfun(@(c) isequal(c, client), players);
+    playerHands{senderIndex} = [playerHands{senderIndex};drawCards(1)];
+    broadcastGameState()
+end
+
+
 function startGame()
     global discardPile;
     global currentTurn;
@@ -126,7 +170,6 @@ function startGame()
 
     discardPile = drawCards(1); % Draw the first card
     broadcastGameState();
-    sendToPlayer(currentTurn, struct('type', 'turn', 'message', 'Your turn!'));
 end
 
 function broadcastGameState()
