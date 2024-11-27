@@ -1,14 +1,42 @@
-% ================== INITIAL CONFIGURATION ================== %
+clear all;
+
+% =================== SERVER CONFIGURATION ================== %
+global playerGameStart;
 SERVER_ADDR = "0.0.0.0";
-SERVER_PORT = 5052;
-PLAYER_START = 4;
+SERVER_PORT = 5050;
+playerGameStart = 1;
 
 % ================== SERVER INITIALIZATION ================== %
 disp('Initializing Game States...');
-initGameState(SERVER_ADDR, SERVER_PORT, PLAYER_START); % Init Server and Game States
+global players;
+global playerHands;
+global mainDeck;
+global discardPile;
+global currentTurn;
+global client;
+global app;
+
+client = tcpserver(SERVER_ADDR, SERVER_PORT);
+app = uifigure('Name', 'Uno Game Server Console', 'Position', [100, 100, 600, 400]);
+uibutton(app, 'Text', 'Terminate Server', ...
+    'Position', [450, 20, 120, 40], ...
+    'ButtonPushedFcn', @(btn, event) terminateServer());
+
+uibutton(app, 'Text', 'Broadcast State', ...
+'Position', [10, 20, 100, 50], ...
+'ButtonPushedFcn', @(btn, event) broadcastGameState());
+
+
+players = [];
+playerHands = [];
+mainDeck = createUnoDeck();
+discardPile = [];
+currentTurn = 1;
+
 disp('UNO Server started. Waiting for players to connect...');
 
 % ================== PRIMARY MAIN FUNCTION ================== %
+global stop;
 while true
     try 
         main();
@@ -16,10 +44,15 @@ while true
         disp("Error: " + exception.message);
     end 
     pause(0.1); % Prevent busy waiting
+    if stop == true
+        break
+    end
 end
 
-% ================== FUNCTION DEFINITIONS ================== %
+% ======================= SERVER FUNCTIONS ======================= %
 
+% ========== SERVER MAIN ========== %
+% The main fuction that will run in a loop.
 function main()
     global client;
     if client.Connected
@@ -30,33 +63,11 @@ function main()
     end
 end
 
-function initGameState(bind, port, PLAYER_START)
-    global players;
-    global playerHands;
-    global mainDeck;
-    global discardPile;
-    global currentTurn;
-    global playerGameStart;
-    global client;
-
-    playerGameStart = PLAYER_START;
-
-    client = tcpserver(bind, port); % Create the TCP server
-
-    players = {};
-    playerHands = {};
-    mainDeck = createUnoDeck();
-    discardPile = {};
-    currentTurn = 1;
-end
-
+% ========== PROCESS CLIENT REQUEST ========== %
 function onSRVReceive(client)
     global players;
-
     jsonData = read(client, client.NumBytesAvailable, "string");
     data = jsondecode(jsonData);
-
-    % Handle different types of messages
     if isfield(data, 'type')
         switch data.type
             case 'connect'
@@ -70,21 +81,43 @@ function onSRVReceive(client)
     end
 end
 
+% ========== PLAYER CONNECT ========== %
 function onPlayerConnect(client)
     global players;
     global playerHands;
     global playerGameStart;
-
     players{end+1} = client;
     playerHands{end+1} = drawCards(7); % Draw 7 cards
     disp(['Player ', num2str(numel(players)), ' connected.']);
-    write(client, jsonencode(struct('type', 'welcome', 'message', 'Welcome to UNO!')), "string");
+    write(client, jsonencode(...
+    struct(...
+        'type', 'welcome', ...
+        'message', 'Welcome to UNO!')...
+    ), "string"...
+    );
 
     if numel(players) >= playerGameStart
-        broadcastToAll(struct('type', 'start', 'message', 'Game is starting!'));
+        broadcastToAll(struct('type', 'start'));
         startGame();
     end
 end
+
+% ========== STOP SERVER ========== %
+function terminateServer()
+    global client;
+    global stop;
+    global app;
+    close(app);
+    delete(client); % Delete the tcpserver object from memory 
+    delete(app);
+    stop = true;
+end
+
+
+
+% ======================= GAME FUNCTIONS ======================= %
+
+% ========== GAME START ========== %
 
 function startGame()
     global discardPile;
@@ -92,9 +125,25 @@ function startGame()
     global players;
 
     discardPile = drawCards(1); % Draw the first card
-    broadcastToAll(struct('type', 'game_update', 'message', ...
-        ['Starting card is: ', discardPile{1}], 'discard_pile', discardPile));
+    broadcastGameState();
     sendToPlayer(currentTurn, struct('type', 'turn', 'message', 'Your turn!'));
+end
+
+function broadcastGameState()
+    disp("Broadcasting Game State...")
+    global players;
+    global playerHands;
+    global currentTurn
+    global discardPile;
+    for i = 1:numel(players)
+        jsonMessage = jsonencode(struct( ...
+            'type', 'game_state', ...
+            'deck', table(playerHands{i}), ...
+            'discard_pile', table(discardPile), ...
+            'turn', currentTurn));
+        disp(jsonMessage);
+        write(players{i}, jsonMessage, "string");
+    end
 end
 
 function onPlayerMove(data)
@@ -188,6 +237,24 @@ function isValid = isValidMove(move, discardPile)
     isValid = strcmp(move.color, lastCard.color) || strcmp(move.type, lastCard.type);
 end
 
+function deck = createUnoDeck()
+    colors = {'Red', 'Green', 'Blue', 'Yellow'};
+    cardIDs = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Skip', 'Reverse', 'Draw Two'};
+    deck = [];
+    for c = 1:numel(colors)
+        for id = 1:numel(cardIDs)
+            deck = [deck; {cardIDs{id}, colors{c}}];
+            if ~strcmp(cardIDs{id}, '0')
+                deck = [deck; {cardIDs{id}, colors{c}}];
+            end
+        end
+    end
+    for i = 1:4
+        deck = [deck; {'Wild', 'None'}; {'Wild Draw Four', 'None'}];
+    end
+    deck = deck(randperm(size(deck, 1)), :); % Shuffle the deck
+end
+
 function [cards] = drawCards(numCards)
     global mainDeck;
     global discardPile;
@@ -205,7 +272,7 @@ function [cards] = drawCards(numCards)
             mainDeck = mainDeck(randperm(size(mainDeck, 1)), :); % Shuffle
             disp('Reshuffling discard pile into deck...');
         end
-        cards{end+1} = mainDeck(1, :);
+        cards = [cards; mainDeck(1, :)];
         mainDeck(1, :) = []; % Remove the card
     end
 end
