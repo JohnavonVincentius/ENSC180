@@ -2,8 +2,7 @@ clear all;
 
 % =================== CLIENT CONFIGURATION ================== %
 serverIP = '127.0.0.1';
-port = 55000;
-
+server_PORTS = [55000,55100,55200,55300];
 % ================== CLIENT INITIALIZATION ================== %
 disp('Connecting to UNO server...');
 global server;
@@ -12,27 +11,33 @@ global discardPile;
 global currentTurn;
 serverConnected = false;
 
-try
-    server = tcpclient(serverIP, port);
-    write(server, jsonencode(struct('type', 'connect')), "string");
-    tic;
-    while toc < 10
-        if server.NumBytesAvailable > 0
-            response = jsondecode(read(server, server.NumBytesAvailable, "string"))
-            if response.type == 'welcome'
-                disp("Connected to UNO Server, Waiting for players...")
-                serverConnected = true;
-                break;
+
+for i = i:length(server_PORTS)
+    try
+        server = tcpclient(serverIP, server_PORTS(i));
+        write(server, jsonencode(struct('type', 'connect')), "string");
+        tic;
+        while toc < 2
+            if server.NumBytesAvailable > 0
+                response = jsondecode(read(server, server.NumBytesAvailable, "string"))
+                if response.type == 'welcome'
+                    disp("Connected to UNO Server, Waiting for players...")
+                    serverConnected = true;
+                    break;
+                end
             end
         end
+    catch exception
     end
-catch exception
-    disp("Error"+ exception.message)
+
+    if serverConnected == false
+        disp("Failed to connect to server, retrying on different port")
+    else
+        disp("Connected using port:" + server_PORTS(i))
+        break;
+    end
 end
 
-if serverConnected == false
-    disp("Failed to connect to server")
-end
 if serverConnected == true
     setupUI()
 end
@@ -57,7 +62,6 @@ function main()
     global server;
     if server.NumBytesAvailable > 0
         onSRVReceive(server);
-        
     end
 end
 
@@ -98,7 +102,7 @@ function processGameState(decodedStruct)
         cellArray(i, :) = dataStructArray(i).Var1;
     end
 
-    discardPile = decodedStruct.discard_pile
+    discardPile = decodedStruct.discard_pile.Var1;
     deck = cellArray;
     currentTurn = decodedStruct.turn;
 
@@ -115,11 +119,27 @@ function renderUI()
     global deck
     global discardPile
 
+    discardPileUI.Text = discardPile(1);
+    
+    switch discardPile{2}
+        case 'Red'
+            color = [1, 0, 0];  % Red
+        case 'Blue'
+            color = [0, 0, 1];  % Blue
+        case 'Green'
+            color = [0, 1, 0];  % Green
+        case 'Yellow'
+            color = [1, 1, 0];  % Yellow
+        case 'Wild'
+            color = [0.5, 0.5, 0.5];  % Gray for Wild
+        otherwise
+            color = [1, 1, 1];  % Default white
+    end
+
+    discardPileUI.BackgroundColor = color;
+
     % Clear any existing UI elements before re-adding
     delete(allchild(yourHandPanel));  % Remove all child components
-
-
-
     % Loop through the current cards and add them as buttons
     for i = 1:numel(deck)
 
@@ -146,28 +166,15 @@ function renderUI()
             'FontWeight', 'bold', ...
             'FontSize', 14, ...
             'UserData', i, ...
-            'ButtonPushedFcn', @(src, event) playCardCallback(src, cards, i));
+            'ButtonPushedFcn', @(src, event) playCardCallback(deck, i));
     end
-
+    % discardPileUI.Text = discardPile.discardPile(1);
 
 end
 
-function playCardCallback(cardButton, cards, cardIndex)
-    % Log the card being played
-    disp(['You played card: ', cards{cardIndex}]);
-
-    % Update the discard pile with only the type of the card (e.g., '5')
-    [cardColor, cardText] = parseCard(cards{cardIndex})
-    ;
-    discardPile.Text = cardText;
-    discardPile.BackgroundColor = cardColor;
-
-    % Remove the played card from the hand
-    cards = [cards(1:cardIndex-1), cards(cardIndex+1:end)];  % Ensure only the played card is removed
-
-    % Refresh the hand without resetting the entire panel
-    renderCards(cards);
-    delete(cardButton);  % Remove the button corresponding to the played card
+function playCardCallback(cards, cardIndex)
+    global server;
+    write(server, jsonencode(struct('type','move', 'move', table(cards(cardIndex,:)) )))
 end
 
 function drawCardCallback()

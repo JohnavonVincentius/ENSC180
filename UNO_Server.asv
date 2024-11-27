@@ -16,7 +16,6 @@ global client_1;
 global client_2;
 global client_3;
 global client_4;
-global t
 
 global app;
 
@@ -24,12 +23,6 @@ client_1 = tcpserver(SERVER_ADDR, 55000, 'ConnectionChangedFcn', @handleClient);
 client_2 = tcpserver(SERVER_ADDR, 55100, 'ConnectionChangedFcn', @handleClient);
 client_3 = tcpserver(SERVER_ADDR, 55200, 'ConnectionChangedFcn', @handleClient);
 client_4 = tcpserver(SERVER_ADDR, 55300, 'ConnectionChangedFcn', @handleClient);
-t = timer;
-t.ExecutionMode = 'fixedRate';
-t.Period = 1;
-t.TimerFcn = @broadcastGameState; % Function with limit
-start(t);
-
 
 app = uifigure('Name', 'Uno Game Server Console', 'Position', [100, 100, 600, 400]);
 uibutton(app, 'Text', 'Terminate Server', ...
@@ -143,7 +136,6 @@ function terminateServer()
     global client_2;
     global client_3;
     global client_4;
-    global t;
 
 
     global stop;
@@ -153,8 +145,7 @@ function terminateServer()
     delete(client_3);
     delete(client_2);
     delete(client_1);
-    stop(t);
-    delete(t);
+
     delete(app);
     stop = true;
 end
@@ -183,8 +174,7 @@ function startGame()
     broadcastGameState();
 end
 
-function broadcastGameState(~,~)
-try
+function broadcastGameState()
     disp("Broadcasting Game State...")
     global players;
     global playerHands;
@@ -199,9 +189,6 @@ try
         disp(jsonMessage);
         write(players{i}, jsonMessage, "string");
     end
-catch exeption
-    disp(exeption)
-end
 end
 
 function onPlayerMove(data)
@@ -225,15 +212,8 @@ function onPlayerMove(data)
     
     handleSpecialCard(move);
 
-    for i = 1:size(playerHands{currentTurn}, 1)
-        % Check if the current row matches the target
-        if isequal(playerHands{currentTurn}(i, :), move)
-            % Remove the row by excluding it
-            playerHands{currentTurn} = [playerHands{currentTurn}(1:i-1, :); playerHands{currentTurn}(i+1:end, :)];
-            return; % Exit after the first match
-        end
-    end
-    broadcastGameState();
+    
+
 
     % Check for winner
     if isempty(playerHands{currentTurn})
@@ -244,6 +224,7 @@ function onPlayerMove(data)
 
     % Notify the next player
     sendToPlayer(currentTurn, struct('type', 'turn', 'message', 'Your turn!'));
+    broadcastGameState();
 end
 
 function handleSpecialCard(move)
