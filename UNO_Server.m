@@ -3,7 +3,7 @@ clear all;
 % =================== SERVER CONFIGURATION ================== %
 global playerGameStart;
 SERVER_ADDR = "0.0.0.0";
-playerGameStart = 1;
+playerGameStart = 2;
 
 % ================== SERVER INITIALIZATION ================== %
 disp('Initializing Game States...');
@@ -64,9 +64,8 @@ function handleClient(server, ~)
     pause(0.1);
 end
 
-
 % ================== PRIMARY MAIN FUNCTION ================== %
-global stop;
+global stop_service;
 while true
     try
         main(client_1);
@@ -77,7 +76,7 @@ while true
         disp("Error: " + exception.message);
     end
     pause(0.1); % Prevent busy waiting
-    if stop == true
+    if stop_service == true
         break
     end
 end
@@ -105,7 +104,7 @@ function onSRVReceive(client)
             case 'connect'
                 onPlayerConnect(client);
             case 'move'
-                onPlayerMove(data);
+                onPlayerMove(client,data);
             case 'draw_card'
                 playerDrawCard(client);
             otherwise
@@ -126,7 +125,8 @@ function onPlayerConnect(client)
     write(client, jsonencode(...
     struct(...
         'type', 'welcome', ...
-        'message', 'Welcome to UNO!')...
+        'message', 'Welcome to UNO!', ...
+        'player',find(cellfun(@(c) isequal(c, client), players)))...
     ), "string"...
     );
 
@@ -144,10 +144,10 @@ function terminateServer()
     global client_3;
     global client_4;
     global t;
-
-
-    global stop;
+    global stop_service;
     global app;
+    stop_service = true;
+
     close(app);
     delete(client_4); % Delete the tcpserver object from memory 
     delete(client_3);
@@ -156,10 +156,7 @@ function terminateServer()
     stop(t);
     delete(t);
     delete(app);
-    stop = true;
 end
-
-
 
 % ======================= GAME FUNCTIONS ======================= %
 
@@ -190,12 +187,16 @@ try
     global playerHands;
     global currentTurn
     global discardPile;
+    player = size(players)
+    numCards = cellfun(@(x) size(x, 1), playerHands)
     for i = 1:numel(players)
         jsonMessage = jsonencode(struct( ...
             'type', 'game_state', ...
             'deck', table(playerHands{i}), ...
             'discard_pile', table(discardPile{end}), ...
-            'turn', currentTurn));
+            'turn', currentTurn, ...
+            'cards', table(player,numCards)...
+            ));
         disp(jsonMessage);
         write(players{i}, jsonMessage, "string");
     end
@@ -204,10 +205,16 @@ catch exeption
 end
 end
 
-function onPlayerMove(data)
+function onPlayerMove(client,data)
     global currentTurn;
     global discardPile;
     global playerHands;
+    global players;
+
+    if client ~= players{currentTurn}
+        write(client, jsonencode(struct('type', 'error', 'message', 'Invalid move! Try again.')),"string");
+        return;
+    end
 
     move = transpose(data.move.Var1);
     disp(['Player ', num2str(currentTurn), ' played: ', move]);
@@ -218,21 +225,20 @@ function onPlayerMove(data)
         return;
     end
 
-    % Apply the move
     discardPile{end+1} = move;
-
-    % Handle special cards and advance turn
     
-    handleSpecialCard(move);
-
     for i = 1:size(playerHands{currentTurn}, 1)
         % Check if the current row matches the target
         if isequal(playerHands{currentTurn}(i, :), move)
             % Remove the row by excluding it
             playerHands{currentTurn} = [playerHands{currentTurn}(1:i-1, :); playerHands{currentTurn}(i+1:end, :)];
-            return; % Exit after the first match
+            break; % Exit after the first match
         end
     end
+
+    handleSpecialCard(move);
+
+
     broadcastGameState();
 
     % Check for winner
@@ -274,21 +280,12 @@ function handleSpecialCard(move)
             disp(['Player ', num2str(nextPlayer), ' draws two cards!']);
             currentTurn = advanceTurn(nextPlayer, numel(players)); % Skip the next player's turn
 
-        case 'Wild'
-            % Let the player choose a new color
-            disp('Wild card played! Waiting for color choice...');
-            newColor = promptColor(currentTurn); % Prompt for color selection
-            discardPile{end, 2} = newColor; % Update the discard pile with the chosen color
-            disp(['Player ', num2str(currentTurn), ' chose ', newColor, ' as the new color!']);
-
         case 'Wild Draw Four'
             % Force the next player to draw four cards and let the player choose a color
             disp('Wild Draw Four card played!');
             nextPlayer = advanceTurn(currentTurn, numel(players));
             playerHands{nextPlayer} = [playerHands{nextPlayer}; drawCards(4)];
-            newColor = promptColor(currentTurn); % Prompt for color selection
             discardPile{end, 2} = newColor; % Update the discard pile with the chosen color
-            disp(['Player ', num2str(currentTurn), ' chose ', newColor, ' as the new color!']);
             disp(['Player ', num2str(nextPlayer), ' draws four cards!']);
             currentTurn = advanceTurn(nextPlayer, numel(players)); % Skip the next player's turn
 
@@ -303,6 +300,11 @@ end
 function isValid = isValidMove(move, discardPile)
     % Check if the move is valid
     lastCard = discardPile(end);
+
+    if strcmp(move{1,2}, 'None') || strcmp( lastCard{1}{1,2} ,'None');
+        isValid = true;
+        return;
+    end
     isValid = strcmp(move{1,1}, lastCard{1}{1,1}) || strcmp(move{1,2}, lastCard{1}{1,2});
 end
 
