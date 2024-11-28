@@ -1,7 +1,7 @@
 clear all;
 
 % =================== CLIENT CONFIGURATION ================== %
-serverIP = '127.0.0.1';
+serverIP = '209.87.56.244';
 server_PORTS = [55000,55100,55200,55300];
 % ================== CLIENT INITIALIZATION ================== %
 disp('Connecting to UNO server...');

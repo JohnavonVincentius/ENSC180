@@ -287,7 +287,6 @@ function handleSpecialCard(move)
             playerHands{nextPlayer} = [playerHands{nextPlayer}; drawCards(4)];
             discardPile{end, 2} = newColor; % Update the discard pile with the chosen color
             disp(['Player ', num2str(nextPlayer), ' draws four cards!']);
-            currentTurn = advanceTurn(nextPlayer, numel(players)); % Skip the next player's turn
 
         otherwise
             % No special effect for normal cards
