@@ -10,7 +10,7 @@ global deck;
 global discardPile;
 global currentTurn;
 serverConnected = false;
-
+global playerid
 
 for i = i:length(server_PORTS)
     try
@@ -23,6 +23,7 @@ for i = i:length(server_PORTS)
                 if response.type == 'welcome'
                     disp("Connected to UNO Server, Waiting for players...")
                     serverConnected = true;
+                    playerid = response.player;
                     break;
                 end
             end
@@ -90,7 +91,11 @@ function processGameState(decodedStruct)
     global deck;
     global discardPile;
     global currentTurn;
-
+    global yourHandPanel
+    global eastCardCount
+    global playerid
+    global westCardCount
+    
     dataStructArray = decodedStruct.deck;
     
     % Initialize an empty cell array
@@ -105,6 +110,12 @@ function processGameState(decodedStruct)
     discardPile = decodedStruct.discard_pile.Var1;
     deck = cellArray;
     currentTurn = decodedStruct.turn;
+
+    if currentTurn == playerid
+        yourHandPanel.BackgroundColor = [0.6, 0.6, 0.6];
+    else
+        yourHandPanel.BackgroundColor = [1,1,1];
+    end
 
     disp(deck);
 end
@@ -214,18 +225,12 @@ function setupUI()
     northBox = uipanel(fig, 'Position', [350, 450, 100, 100], 'BackgroundColor', [0.8 0.8 0.8]);
     northLabel = uilabel(northBox, 'Text', 'Player 3', ...
         'Position', [10, 60, 80, 30], 'HorizontalAlignment', 'center');
-    northCardCount = uilabel(northBox, 'Text', '0 cards', ...
-        'Position', [10, 10, 80, 30], 'HorizontalAlignment', 'center');
     
     eastBox = uipanel(fig, 'Position', [625, 275, 100, 100], 'BackgroundColor', [0.8 0.8 0.8]);
     eastLabel = uilabel(eastBox, 'Text', 'Player 4', ...
         'Position', [10, 60, 80, 30], 'HorizontalAlignment', 'center');
-    eastCardCount = uilabel(eastBox, 'Text', '0 cards', ...
-        'Position', [10, 10, 80, 30], 'HorizontalAlignment', 'center');
     
     westBox = uipanel(fig, 'Position', [75, 275, 100, 100], 'BackgroundColor', [0.8 0.8 0.8]);
     westLabel = uilabel(westBox, 'Text', 'Player 2', ...
         'Position', [10, 60, 80, 30], 'HorizontalAlignment', 'center');
-    westCardCount = uilabel(westBox, 'Text', '0 cards', ...
-        'Position', [10, 10, 80, 30], 'HorizontalAlignment', 'center');  
 end
